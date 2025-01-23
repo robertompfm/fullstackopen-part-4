@@ -4,17 +4,23 @@ const mongoose = require('mongoose')
 const supertest = require('supertest')
 const app = require('../app')
 const Blog = require('../models/blog')
+const User = require('../models/user')
 const helper = require('./test_helper')
 const api = supertest(app)
 
 describe('when there are some blogs saved initially', () => {
   beforeEach(async () => {
     await Blog.deleteMany({})
+    await User.deleteMany({})
+
+    const userObject = new User(helper.initialUser)
+
+    await userObject.save()
     await Blog.insertMany(helper.initialBlogs)
   })
 
   describe('blog list tests', () => {
-    test('step 1 - get right amount of blog posts', async () => {
+    test('get right amount of blog posts', async () => {
       const response = await api
       .get('/api/blogs')
       .expect(200)
@@ -23,17 +29,20 @@ describe('when there are some blogs saved initially', () => {
       assert.strictEqual(response.body.length, helper.initialBlogs.length)
     })
     
-    test('step 2 - unique identifier id', async () => {
+    test('unique identifier id', async () => {
       const response = await api.get('/api/blogs')
       
       const ids = response.body.map(e => e.id)
       assert(ids.every(id => !!id))
     })
     
-    test('step 3 - add a new blog post', async () => {
+    test('add a new blog post', async () => {
+      const token = helper.getToken()
+
       await api
       .post('/api/blogs')
       .send(helper.newBlog)
+      .set('Authorization', `Bearer ${token}`)
       .expect(201)
       .expect('Content-Type', /application\/json/)
       
@@ -47,10 +56,13 @@ describe('when there are some blogs saved initially', () => {
       assert(titles.includes(helper.newBlog.title))
     })
     
-    test('step 4 - missing like property is set to 0', async () => {
+    test('missing like property is set to 0', async () => {
+      const token = helper.getToken()
+
       await api
       .post('/api/blogs')
       .send(helper.newBlog)
+      .set('Authorization', `Bearer ${token}`)
       .expect(201)
       .expect('Content-Type', /application\/json/)
       
@@ -61,12 +73,16 @@ describe('when there are some blogs saved initially', () => {
       assert.strictEqual(addedBlog.likes, 0)
     })
     
-    test('step 5 - missing title or url will return bad request', async () => {
+    test('missing title or url will return bad request', async () => {
+      const token = helper.getToken()
+
       await api
       .post('/api/blogs')
       .send({
-        likes: 2
+        likes: 2,
+        userId: helper.initialUser._id
       })
+      .set('Authorization', `Bearer ${token}`)
       .expect(400)
       .expect('Content-Type', /application\/json/)
       
@@ -77,12 +93,14 @@ describe('when there are some blogs saved initially', () => {
   })
 
   describe('blog list expansions', () => {
-    test('step 1 - test delete functionality', async () => {
+    test('test delete functionality', async () => {
       const blogsAtStart = await helper.blogsInDb()
       const blogToDelete = blogsAtStart[0]
+      const token = helper.getToken()
       
       await api
       .delete(`/api/blogs/${blogToDelete.id}`)
+      .set('Authorization', `Bearer ${token}`)
       .expect(204)
       
       const blogsAtEnd = await helper.blogsInDb()
@@ -93,7 +111,7 @@ describe('when there are some blogs saved initially', () => {
       assert(!titles.includes(blogToDelete.title))
     })
     
-    test('step 2 - test update functionality', async () => {
+    test('test update functionality', async () => {
       const blogsAtStart = await helper.blogsInDb()
       const blogToUpdate = blogsAtStart[0]
       
@@ -112,6 +130,19 @@ describe('when there are some blogs saved initially', () => {
       const updatedBlog = blogsAtEnd.find(blog => blog.id === blogToUpdate.id)
       
       assert.strictEqual(updatedBlog.likes, blogToUpdate.likes + 1)
+    })
+
+    test('add blog without token should fail', async () => {
+      await api
+      .post('/api/blogs')
+      .send(helper.newBlog)
+      .expect(401)
+      .expect('Content-Type', /application\/json/)
+      
+      
+      const blogsAdded = await helper.blogsInDb()
+      
+      assert.strictEqual(blogsAdded.length, helper.initialBlogs.length)
     })
   })
 })
